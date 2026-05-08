@@ -1,7 +1,8 @@
 # 기계학습 기초 팀 프로젝트
 
 기계학습 기초 1팀 프로젝트 레포입니다.
- 
+- Notion : https://www.notion.so/3598fc4dd92380e5a175fa80c98d8a7f?source=copy_link
+
 ## 개발 환경
 - Python Version: 3.11.x
 - Dependency Management: requirements.txt
