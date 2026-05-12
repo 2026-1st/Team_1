@@ -164,3 +164,6 @@ reports/figures/*
 
 # macOS
 .DS_Store
+
+# agent docs
+GEMINI.md
