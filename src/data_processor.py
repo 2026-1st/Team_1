@@ -16,44 +16,50 @@ OUTPUT_PATH = PROCESSED_DIR / "all_companies_model_data.csv"
 
 COMPANY_CONFIG = {
     "samsung": {
-        "files": ["삼성_1.csv", "삼성_2.csv", "삼성_3.csv", "삼성_4.csv"],
+        "kor_files": ["삼성_1.csv", "삼성_2.csv", "삼성_3.csv", "삼성_4.csv"],
+        "glb_files": ["samsung_global.csv"],
         "ticker": "005930.KS",
         "company_name": "삼성전자",
         "foreign_ratio": 0.50,
     },
     "skhynix": {
-        "files": ["sk_1.csv", "sk_2.csv", "sk_3.csv", "sk_4.csv"],
+        "kor_files": ["sk_1.csv", "sk_2.csv", "sk_3.csv", "sk_4.csv"],
+        "glb_files": ["skhynix_global.csv"],
         "ticker": "000660.KS",
         "company_name": "SK하이닉스",
         "foreign_ratio": 0.53,
     },
     "naver": {
-        "files": ["네이버_1.csv", "네이버_2.csv", "네이버_3.csv", "네이버_4.csv"],
+        "kor_files": ["네이버_1.csv", "네이버_2.csv", "네이버_3.csv", "네이버_4.csv"],
+        "glb_files": ["naver_global.csv"],
         "ticker": "035420.KS",
         "company_name": "네이버",
         "foreign_ratio": 0.45,
     },
     "hanwha": {
-        "files": ["한화_1.csv", "한화_2.csv", "한화_3.csv", "한화_4.csv"],
+        "kor_files": ["한화_1.csv", "한화_2.csv", "한화_3.csv", "한화_4.csv"],
+        "glb_files": ["hanwha_global.csv"],
         "ticker": "012450.KS",
         "company_name": "한화에어로스페이스",
         "foreign_ratio": 0.32,
     },
     "lg": {
-        "files": ["엘지_1.csv", "엘지_2.csv", "엘지_3.csv", "엘지_4.csv"],
+        "kor_files": ["엘지_1.csv", "엘지_2.csv", "엘지_3.csv", "엘지_4.csv"],
+        "glb_files": ["lg_global.csv"],
         "ticker": "066570.KS",
         "company_name": "LG전자",
         "foreign_ratio": 0.36,
     },
     "hyundai": {
-        "files": ["현대차_1.csv", "현대차_2.csv", "현대차_3.csv", "현대차_4.csv"],
+        "kor_files": ["현대차_1.csv", "현대차_2.csv", "현대차_3.csv", "현대차_4.csv"],
+        "glb_files": ["hyundai_global.csv"],
         "ticker": "005380.KS",
         "company_name": "현대차",
         "foreign_ratio": 0.40,
     },
 }
 
-# --- 1. 구글 트렌드 데이터 전처리 함수 (기존 merge_all_trends.py 로직) ---
+# --- 1. 구글 트렌드 데이터 전처리 함수 ---
 
 def read_trend_csv(file_path: Path) -> pd.DataFrame:
     """트렌드 CSV 파일을 읽어서 날짜와 트렌드 컬럼을 정제함"""
@@ -73,30 +79,29 @@ def read_trend_csv(file_path: Path) -> pd.DataFrame:
 
     return df
 
-def merge_company_files(company_key: str, info: dict) -> pd.DataFrame:
-    """개별 기업의 여러 트렌드 파일을 하나로 병합하고 결측치를 보간함"""
+def build_daily_trend(files: list[str], value_col: str) -> pd.DataFrame:
+    """여러 트렌드 파일을 병합하고 전체 날짜를 1일 단위로 맞춤"""
     dfs = []
 
-    for filename in info["files"]:
+    for filename in files:
         file_path = RAW_DIR / filename
 
         if not file_path.exists():
             print(f"[파일 없음] {file_path}")
             continue
 
-        print(f"[읽는 중] {info['company_name']} - {filename}")
+        print(f"[읽는 중] {filename}")
         df = read_trend_csv(file_path)
         dfs.append(df)
 
     if not dfs:
-        print(f"[스킵] {info['company_name']} 데이터 없음")
         return pd.DataFrame()
 
-    company_df = pd.concat(dfs, ignore_index=True)
+    trend_df = pd.concat(dfs, ignore_index=True)
 
     # 겹치는 날짜는 평균 처리
-    company_df = (
-        company_df
+    trend_df = (
+        trend_df
         .groupby("Date", as_index=False)["trend"]
         .mean()
     )
@@ -110,33 +115,82 @@ def merge_company_files(company_key: str, info: dict) -> pd.DataFrame:
         )
     })
 
-    company_df = pd.merge(
+    trend_df = pd.merge(
         full_dates,
-        company_df,
+        trend_df,
         on="Date",
         how="left"
     )
 
-    # 핵심: 주간 데이터로 인해 생긴 중간 결측은 선형 보간
-    company_df["trend"] = company_df["trend"].interpolate(method="linear")
+    # 주간 데이터로 인해 생긴 중간 결측은 선형 보간
+    trend_df["trend"] = trend_df["trend"].interpolate(method="linear")
 
     # 앞뒤 끝부분 결측이 남으면 가까운 값으로 채움
-    company_df["trend"] = company_df["trend"].ffill().bfill()
+    trend_df["trend"] = trend_df["trend"].ffill().bfill()
+    trend_df = trend_df.rename(columns={"trend": value_col})
+
+    return trend_df
+
+
+def merge_company_files(company_key: str, info: dict) -> pd.DataFrame:
+    """기업별 한국/글로벌 트렌드를 병합하고 가중 검색량 값을 계산함"""
+    print(f"\n[기업 처리] {info['company_name']}")
+
+    kor_df = build_daily_trend(info.get("kor_files", info.get("files", [])), "trend_kor")
+
+    if kor_df.empty:
+        print(f"[스킵] {info['company_name']} 한국 검색량 데이터 없음")
+        return pd.DataFrame()
+
+    glb_df = build_daily_trend(info.get("glb_files", []), "trend_glb")
+
+    if glb_df.empty:
+        print(f"[경고] {info['company_name']} 글로벌 검색량 데이터 없음 - trend_kor를 trend_glb 임시값으로 사용")
+        glb_df = kor_df[["Date", "trend_kor"]].rename(columns={"trend_kor": "trend_glb"})
+
+    company_df = pd.merge(
+        kor_df,
+        glb_df,
+        on="Date",
+        how="left",
+    )
+
+    company_df["trend_glb"] = company_df["trend_glb"].interpolate(method="linear")
+    company_df["trend_glb"] = company_df["trend_glb"].ffill().bfill()
 
     company_df["ticker"] = info["ticker"]
     company_df["company_name"] = info["company_name"]
     company_df["foreign_ratio"] = info["foreign_ratio"]
-    company_df["weighted_trend"] = company_df["trend"] * company_df["foreign_ratio"]
+    # weighted_trend는 비율이 아니라 한국/글로벌 검색량을 외국인 비율로 가중 평균한 값
+    company_df["weighted_trend"] = (
+        company_df["foreign_ratio"] * company_df["trend_glb"]
+        + (1 - company_df["foreign_ratio"]) * company_df["trend_kor"]
+    )
+
+    company_df = company_df[
+        [
+            "Date",
+            "trend_kor",
+            "trend_glb",
+            "ticker",
+            "company_name",
+            "foreign_ratio",
+            "weighted_trend",
+        ]
+    ]
 
     output_path = PROCESSED_DIR / f"{company_key}_trend_cleaned.csv"
 
-    company_df.to_csv(
-        output_path,
-        index=False,
-        encoding="utf-8-sig"
-    )
+    try:
+        company_df.to_csv(
+            output_path,
+            index=False,
+            encoding="utf-8-sig"
+        )
+        print(f"[기업 저장 완료] {output_path}")
+    except PermissionError:
+        print(f"[경고] 파일이 열려 있어 저장하지 못함: {output_path}")
 
-    print(f"[기업 저장 완료] {output_path}")
     return company_df
 
 # --- 2. 주가 데이터 수집 및 피처 생성 함수 (기존 merge_stock_data.py 로직) ---
@@ -210,8 +264,12 @@ def main():
         return
 
     final_trend_df = pd.concat(all_trend_data, ignore_index=True)
-    final_trend_df.to_csv(TREND_PATH, index=False, encoding="utf-8-sig")
-    print(f"[트렌드 병합 완료] {TREND_PATH}")
+    try:
+        final_trend_df.to_csv(TREND_PATH, index=False, encoding="utf-8-sig")
+        print(f"[트렌드 병합 완료] {TREND_PATH}")
+    except PermissionError:
+        print(f"[에러] 파일이 열려 있어 저장하지 못함: {TREND_PATH}")
+        return
 
     # 단계 2: 주가 데이터 병합 및 피처 생성
     print("\n--- 2단계: 주가 데이터 병합 및 피처 생성 시작 ---")
@@ -245,7 +303,11 @@ def main():
     merged = merged.dropna()
 
     # 최종 데이터 저장
-    merged.to_csv(OUTPUT_PATH, index=False, encoding="utf-8-sig")
+    try:
+        merged.to_csv(OUTPUT_PATH, index=False, encoding="utf-8-sig")
+    except PermissionError:
+        print(f"[에러] 파일이 열려 있어 저장하지 못함: {OUTPUT_PATH}")
+        return
 
     print("\n[최종 처리 완료]")
     print(f"결과 파일: {OUTPUT_PATH}")
