@@ -108,6 +108,10 @@ class GoogleTrendsCollector:
         df = pd.merge(full_dates, df, on="Date", how="left")
         df["trend"] = df["trend"].interpolate(method="linear")
         df["trend"] = df["trend"].ffill().bfill()
+        max_value = df["trend"].max()
+
+        if pd.notna(max_value) and max_value > 0:
+            df["trend"] = (df["trend"] / max_value * 100).clip(lower=0, upper=100)
 
         return df
 

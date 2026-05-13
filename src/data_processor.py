@@ -132,6 +132,64 @@ def build_daily_trend(files: list[str], value_col: str) -> pd.DataFrame:
     return trend_df
 
 
+def normalize_to_100(series: pd.Series) -> pd.Series:
+    """검색량 지표를 Google Trends 해석 기준인 0~100 범위로 재정규화함"""
+    series = pd.to_numeric(series, errors="coerce")
+    max_value = series.max()
+
+    if pd.isna(max_value) or max_value <= 0:
+        return series.fillna(0)
+
+    return (series / max_value * 100).clip(lower=0, upper=100)
+
+
+def long_flat_mask(series: pd.Series, min_run: int = 14) -> pd.Series:
+    """같은 값이 오래 반복되는 구간을 수집 실패 가능성이 큰 구간으로 표시함"""
+    values = series.reset_index(drop=True)
+    groups = values.ne(values.shift()).cumsum()
+    run_lengths = values.groupby(groups).transform("size")
+
+    return run_lengths >= min_run
+
+
+def build_scaled_fallback(source: pd.Series, target: pd.Series) -> pd.Series:
+    """한국 검색량의 날짜별 흐름을 글로벌 검색량 범위에 맞춘 대체값으로 변환함"""
+    source_norm = normalize_to_100(source)
+    target_valid = target.dropna()
+
+    if target_valid.empty:
+        return source_norm
+
+    target_min = target_valid.min()
+    target_max = target_valid.max()
+
+    if target_max <= target_min:
+        return source_norm
+
+    return target_min + (source_norm / 100) * (target_max - target_min)
+
+
+def clean_global_trend(company_df: pd.DataFrame) -> pd.DataFrame:
+    """글로벌 검색량의 과도한 스케일과 긴 반복 구간을 보정함"""
+    company_df = company_df.copy()
+
+    company_df["trend_kor"] = normalize_to_100(company_df["trend_kor"])
+    company_df["trend_glb"] = normalize_to_100(company_df["trend_glb"])
+
+    flat_mask = long_flat_mask(company_df["trend_glb"])
+    fallback = build_scaled_fallback(
+        company_df["trend_kor"],
+        company_df["trend_glb"].mask(flat_mask),
+    )
+
+    company_df.loc[flat_mask, "trend_glb"] = fallback.loc[flat_mask]
+    company_df["trend_glb"] = company_df["trend_glb"].interpolate(method="linear")
+    company_df["trend_glb"] = company_df["trend_glb"].ffill().bfill()
+    company_df["trend_glb"] = normalize_to_100(company_df["trend_glb"])
+
+    return company_df
+
+
 def merge_company_files(company_key: str, info: dict) -> pd.DataFrame:
     """기업별 한국/글로벌 트렌드를 병합하고 가중 검색량 값을 계산함"""
     print(f"\n[기업 처리] {info['company_name']}")
@@ -157,6 +215,7 @@ def merge_company_files(company_key: str, info: dict) -> pd.DataFrame:
 
     company_df["trend_glb"] = company_df["trend_glb"].interpolate(method="linear")
     company_df["trend_glb"] = company_df["trend_glb"].ffill().bfill()
+    company_df = clean_global_trend(company_df)
 
     company_df["ticker"] = info["ticker"]
     company_df["company_name"] = info["company_name"]
