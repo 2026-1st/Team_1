@@ -1,20 +1,10 @@
 import os
 
 # ==========================================
-# 데이터 수집 설정
+# 1. 기업 및 주식 설정 (Company & Stock)
 # ==========================================
 
-# yfinance 기준:
-# KOSPI: .KS
-# KOSDAQ: .KQ
-#
-# keywords:
-# base          : 기업명 기본 검색
-# stock         : 주가 관심
-# forecast      : 전망 관심
-# earnings      : 실적 관심
-# business_plan : 사업계획서 관심
-
+# yfinance 티커 기준: KOSPI (.KS), KOSDAQ (.KQ)
 COMPANY_CONFIG = {
     "005930.KS": {
         "company_name": "삼성전자",
@@ -85,38 +75,44 @@ COMPANY_CONFIG = {
 }
 
 # ==========================================
-# 데이터 수집 기간 설정
+# 2. 데이터 수집 기간 (Date Range)
 # ==========================================
 
-# 모든 기업을 같은 1일 단위 기간으로 수집
 START_DATE = "2025-05-12"
 END_DATE = "2026-05-12"
 
 # ==========================================
-# Google Trends 설정
+# 3. Google Trends 공통 설정
 # ==========================================
 
 GOOGLE_TRENDS_HL = "ko-KR"
 GOOGLE_TRENDS_TZ = 540
+GOOGLE_TRENDS_CAT = 0  # 0: 전체, 7: 금융
 
-# 한국 검색량 기준
-GOOGLE_TRENDS_GEO = "KR"
-
-# 전체 카테고리
-# 금융 카테고리로 제한하려면 7 사용 가능
-GOOGLE_TRENDS_CAT = 0
-
-# pytrends 속도 제한 완화 설정
+# pytrends 속도 제한 및 안정성 설정
 PYTRENDS_RETRIES = 5
 PYTRENDS_BACKOFF_FACTOR = 0.5
-PYTRENDS_WAIT_TIME = 40
+PYTRENDS_WAIT_TIME = 40  # API 호출 간 대기 시간 (초)
 
-# Google Trends는 긴 기간을 한 번에 요청하면 주간 데이터가 나올 수 있어서
-# 90일 이하 구간으로 나누고, 겹치는 7일을 기준으로 구간별 스케일을 보정함
+# 긴 기간 수집을 위한 청크 설정
 GOOGLE_TRENDS_CHUNK_DAYS = 90
 GOOGLE_TRENDS_OVERLAP_DAYS = 7
 
-# 글로벌 검색량 수집 결과 파일명
+# ==========================================
+# 4. 국내 및 글로벌 특정 설정 (Domestic & Global)
+# ==========================================
+
+# 국내(Domestic) 설정
+GOOGLE_TRENDS_GEO_KR = "KR"
+
+# 글로벌(Global) 설정
+GOOGLE_TRENDS_GEO_GLOBAL = ""  # 공백은 전세계를 의미
+
+# 결과 파일명 설정
+ALL_COMPANIES_TRENDS_KR_FILE = "all_companies_google_trends_daily.csv"
+ALL_COMPANIES_TRENDS_GLOBAL_FILE = "all_companies_global_trends.csv"
+
+# 기업별 글로벌 트렌드 파일 매핑 (data/raw/google_trends 내 실제 파일명 준수)
 GLOBAL_TREND_FILES = {
     "005930.KS": "samsung_global.csv",
     "000660.KS": "skhynix_global.csv",
@@ -126,10 +122,8 @@ GLOBAL_TREND_FILES = {
     "005380.KS": "hyundai_global.csv",
 }
 
-ALL_COMPANIES_GLOBAL_TRENDS_FILE = "all_companies_global_trends.csv"
-
 # ==========================================
-# 경로 설정
+# 5. 경로 설정 (Path)
 # ==========================================
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -137,7 +131,9 @@ BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA_DIR = os.path.join(BASE_DIR, "data")
 RAW_DATA_DIR = os.path.join(DATA_DIR, "raw")
 GOOGLE_TRENDS_RAW_DIR = os.path.join(RAW_DATA_DIR, "google_trends")
+STOCK_RAW_DIR = os.path.join(RAW_DATA_DIR, "stock")
 PROCESSED_DATA_DIR = os.path.join(DATA_DIR, "processed")
+
 MODELS_DIR = os.path.join(BASE_DIR, "models")
 REPORTS_DIR = os.path.join(BASE_DIR, "reports")
 
@@ -146,6 +142,7 @@ for path in [
     DATA_DIR,
     RAW_DATA_DIR,
     GOOGLE_TRENDS_RAW_DIR,
+    STOCK_RAW_DIR,
     PROCESSED_DATA_DIR,
     MODELS_DIR,
     REPORTS_DIR,

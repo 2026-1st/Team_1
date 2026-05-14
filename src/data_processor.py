@@ -1,377 +1,157 @@
-from pathlib import Path
+import os
 import pandas as pd
-import yfinance as yf
+from pathlib import Path
+import config
 
-# 경로 설정
-BASE_DIR = Path(__file__).resolve().parents[1]
-RAW_DIR = BASE_DIR / "data" / "raw" / "google_trends"
-PROCESSED_DIR = BASE_DIR / "data" / "processed"
-PROCESSED_DIR.mkdir(parents=True, exist_ok=True)
+class DataProcessor:
+    def __init__(self):
+        # 경로 설정
+        self.raw_trend_dir = Path(config.GOOGLE_TRENDS_RAW_DIR)
+        self.raw_stock_dir = Path(config.DATA_DIR) / "raw" / "stock"
+        self.processed_dir = Path(config.PROCESSED_DATA_DIR)
+        self.processed_dir.mkdir(parents=True, exist_ok=True)
 
-# 설정
-START_DATE = "2025-05-12"
-END_DATE = "2026-05-12"
-TREND_PATH = PROCESSED_DIR / "all_companies_trends_cleaned.csv"
-OUTPUT_PATH = PROCESSED_DIR / "all_companies_model_data.csv"
+        self.trend_path = self.processed_dir / "all_companies_trends_cleaned.csv"
+        self.output_path = self.processed_dir / "all_companies_model_data.csv"
 
-COMPANY_CONFIG = {
-    "samsung": {
-        "kor_files": ["삼성_1.csv", "삼성_2.csv", "삼성_3.csv", "삼성_4.csv"],
-        "glb_files": ["samsung_global.csv"],
-        "ticker": "005930.KS",
-        "company_name": "삼성전자",
-        "foreign_ratio": 0.50,
-    },
-    "skhynix": {
-        "kor_files": ["sk_1.csv", "sk_2.csv", "sk_3.csv", "sk_4.csv"],
-        "glb_files": ["skhynix_global.csv"],
-        "ticker": "000660.KS",
-        "company_name": "SK하이닉스",
-        "foreign_ratio": 0.53,
-    },
-    "naver": {
-        "kor_files": ["네이버_1.csv", "네이버_2.csv", "네이버_3.csv", "네이버_4.csv"],
-        "glb_files": ["naver_global.csv"],
-        "ticker": "035420.KS",
-        "company_name": "네이버",
-        "foreign_ratio": 0.45,
-    },
-    "hanwha": {
-        "kor_files": ["한화_1.csv", "한화_2.csv", "한화_3.csv", "한화_4.csv"],
-        "glb_files": ["hanwha_global.csv"],
-        "ticker": "012450.KS",
-        "company_name": "한화에어로스페이스",
-        "foreign_ratio": 0.32,
-    },
-    "lg": {
-        "kor_files": ["엘지_1.csv", "엘지_2.csv", "엘지_3.csv", "엘지_4.csv"],
-        "glb_files": ["lg_global.csv"],
-        "ticker": "066570.KS",
-        "company_name": "LG전자",
-        "foreign_ratio": 0.36,
-    },
-    "hyundai": {
-        "kor_files": ["현대차_1.csv", "현대차_2.csv", "현대차_3.csv", "현대차_4.csv"],
-        "glb_files": ["hyundai_global.csv"],
-        "ticker": "005380.KS",
-        "company_name": "현대차",
-        "foreign_ratio": 0.40,
-    },
-}
+    def normalize_to_100(self, series: pd.Series) -> pd.Series:
+        """검색량 지표를 0~100 범위로 재정규화"""
+        series = pd.to_numeric(series, errors="coerce")
+        max_value = series.max()
+        if pd.isna(max_value) or max_value <= 0:
+            return series.fillna(0)
+        return (series / max_value * 100).clip(lower=0, upper=100)
 
-# --- 1. 구글 트렌드 데이터 전처리 함수 ---
+    def long_flat_mask(self, series: pd.Series, min_run: int = 14) -> pd.Series:
+        """반복 구간 마스크 생성"""
+        values = series.reset_index(drop=True)
+        groups = values.ne(values.shift()).cumsum()
+        run_lengths = values.groupby(groups).transform("size")
+        return run_lengths >= min_run
 
-def read_trend_csv(file_path: Path) -> pd.DataFrame:
-    """트렌드 CSV 파일을 읽어서 날짜와 트렌드 컬럼을 정제함"""
-    try:
-        df = pd.read_csv(file_path, encoding="cp949")
-    except UnicodeDecodeError:
-        df = pd.read_csv(file_path, encoding="utf-8-sig")
+    def build_scaled_fallback(self, source: pd.Series, target: pd.Series) -> pd.Series:
+        """보조 데이터를 활용한 대체값 생성"""
+        source_norm = self.normalize_to_100(source)
+        target_valid = target.dropna()
+        if target_valid.empty:
+            return source_norm
+        target_min, target_max = target_valid.min(), target_valid.max()
+        if target_max <= target_min:
+            return source_norm
+        return target_min + (source_norm / 100) * (target_max - target_min)
 
-    df = df.iloc[:, :2]
-    df.columns = ["Date", "trend"]
+    def clean_global_trend(self, company_df: pd.DataFrame) -> pd.DataFrame:
+        """글로벌 검색량 품질 보정"""
+        df = company_df.copy()
+        kor_col = "trend_kor" if "trend_kor" in df.columns else "trend_base"
+        
+        df[kor_col] = self.normalize_to_100(df[kor_col])
+        df["trend_glb"] = self.normalize_to_100(df["trend_glb"])
 
-    df["Date"] = pd.to_datetime(df["Date"], errors="coerce")
-    df["trend"] = pd.to_numeric(df["trend"], errors="coerce")
+        flat_mask = self.long_flat_mask(df["trend_glb"])
+        fallback = self.build_scaled_fallback(df[kor_col], df["trend_glb"].mask(flat_mask))
 
-    df = df.dropna(subset=["Date"])
-    df = df.dropna(subset=["trend"])
+        df.loc[flat_mask, "trend_glb"] = fallback.loc[flat_mask]
+        df["trend_glb"] = df["trend_glb"].interpolate(method="linear").ffill().bfill()
+        df["trend_glb"] = self.normalize_to_100(df["trend_glb"])
+        return df
 
-    return df
+    def process_company_trends(self, ticker, kor_trend_all, glb_trend_all):
+        """기업별 트렌드 병합 및 가중치 계산"""
+        info = config.COMPANY_CONFIG[ticker]
+        
+        kor_df = kor_trend_all[kor_trend_all["ticker"] == ticker].copy()
+        if kor_df.empty:
+            return pd.DataFrame()
 
-def build_daily_trend(files: list[str], value_col: str) -> pd.DataFrame:
-    """여러 트렌드 파일을 병합하고 전체 날짜를 1일 단위로 맞춤"""
-    dfs = []
+        glb_df = glb_trend_all[glb_trend_all["ticker"] == ticker].copy()
+        if glb_df.empty:
+            glb_df = kor_df[["Date", "trend_base"]].rename(columns={"trend_base": "trend_glb"})
+        else:
+            glb_df = glb_df[["Date", "trend"]].rename(columns={"trend": "trend_glb"})
 
-    for filename in files:
-        file_path = RAW_DIR / filename
+        kor_df["Date"] = pd.to_datetime(kor_df["Date"])
+        glb_df["Date"] = pd.to_datetime(glb_df["Date"])
+        
+        company_df = pd.merge(kor_df, glb_df, on="Date", how="left")
+        company_df["trend_glb"] = company_df["trend_glb"].interpolate(method="linear").ffill().bfill()
+        company_df = self.clean_global_trend(company_df)
 
-        if not file_path.exists():
-            print(f"[파일 없음] {file_path}")
-            continue
-
-        print(f"[읽는 중] {filename}")
-        df = read_trend_csv(file_path)
-        dfs.append(df)
-
-    if not dfs:
-        return pd.DataFrame()
-
-    trend_df = pd.concat(dfs, ignore_index=True)
-
-    # 겹치는 날짜는 평균 처리
-    trend_df = (
-        trend_df
-        .groupby("Date", as_index=False)["trend"]
-        .mean()
-    )
-
-    # 전체 일간 날짜 생성
-    full_dates = pd.DataFrame({
-        "Date": pd.date_range(
-            start=START_DATE,
-            end=END_DATE,
-            freq="D"
+        kor_col = "trend_kor" if "trend_kor" in company_df.columns else "trend_base"
+        company_df["weighted_trend"] = (
+            company_df["foreign_ratio"] * company_df["trend_glb"]
+            + (1 - company_df["foreign_ratio"]) * company_df[kor_col]
         )
-    })
+        return company_df
 
-    trend_df = pd.merge(
-        full_dates,
-        trend_df,
-        on="Date",
-        how="left"
-    )
+    def make_features(self, df):
+        """머신러닝 피처 생성"""
+        df = df.sort_values(["ticker", "Date"]).copy()
+        df["return"] = df.groupby("ticker")["Close"].pct_change()
+        df["return_lag1"] = df.groupby("ticker")["return"].shift(1)
+        df["return_lag3_mean"] = df.groupby("ticker")["return"].transform(lambda x: x.rolling(3).mean())
+        df["return_lag7_mean"] = df.groupby("ticker")["return"].transform(lambda x: x.rolling(7).mean())
+        df["volume_change"] = df.groupby("ticker")["Volume"].pct_change()
+        df["ma5"] = df.groupby("ticker")["Close"].transform(lambda x: x.rolling(5).mean())
+        df["ma20"] = df.groupby("ticker")["Close"].transform(lambda x: x.rolling(20).mean())
+        df["ma5_gap"] = (df["Close"] - df["ma5"]) / df["ma5"]
+        df["ma20_gap"] = (df["Close"] - df["ma20"]) / df["ma20"]
+        df["volatility_7"] = df.groupby("ticker")["return"].transform(lambda x: x.rolling(7).std())
+        df["next_return"] = df.groupby("ticker")["return"].shift(-1)
+        df["target"] = (df["next_return"] > 0).astype(int)
+        return df
 
-    # 주간 데이터로 인해 생긴 중간 결측은 선형 보간
-    trend_df["trend"] = trend_df["trend"].interpolate(method="linear")
+    def run(self):
+        print("--- 1단계: 트렌드 데이터 전처리 ---")
+        kor_path = self.raw_trend_dir / config.ALL_COMPANIES_TRENDS_KR_FILE
+        glb_path = self.raw_trend_dir / config.ALL_COMPANIES_TRENDS_GLOBAL_FILE
+        
+        if not kor_path.exists() or not glb_path.exists():
+            print("[에러] 수집된 트렌드 파일이 없습니다.")
+            return
 
-    # 앞뒤 끝부분 결측이 남으면 가까운 값으로 채움
-    trend_df["trend"] = trend_df["trend"].ffill().bfill()
-    trend_df = trend_df.rename(columns={"trend": value_col})
+        kor_all, glb_all = pd.read_csv(kor_path), pd.read_csv(glb_path)
+        all_trends = []
+        for ticker in config.COMPANY_CONFIG.keys():
+            df = self.process_company_trends(ticker, kor_all, glb_all)
+            if not df.empty:
+                all_trends.append(df)
+                # 개별 기업별 정제된 트렌드 저장
+                company_key = ticker.replace(".KS", "").replace(".KQ", "").lower()
+                # config에서 가져온 티커 매핑을 활용하거나 단순 변환
+                # 기존 파일명이 skhynix_trend_cleaned.csv 인 경우 등을 고려
+                if ticker == "000660.KS": company_key = "skhynix"
+                elif ticker == "012450.KS": company_key = "hanwha"
+                elif ticker == "066570.KS": company_key = "lg"
+                elif ticker == "035420.KS": company_key = "naver"
+                elif ticker == "005380.KS": company_key = "hyundai"
+                elif ticker == "005930.KS": company_key = "samsung"
+                
+                company_save_path = self.processed_dir / f"{company_key}_trend_cleaned.csv"
+                df.to_csv(company_save_path, index=False, encoding="utf-8-sig")
+                print(f"    [기업별 저장 완료] {company_save_path}")
 
-    return trend_df
+        if not all_trends: return
+        final_trend_df = pd.concat(all_trends, ignore_index=True)
+        final_trend_df.to_csv(self.trend_path, index=False, encoding="utf-8-sig")
 
+        print("--- 2단계: 주가 데이터 병합 및 피처 생성 ---")
+        stock_path = self.raw_stock_dir / "all_companies_stock_raw.csv"
+        if not stock_path.exists():
+            print("[에러] 주가 파일이 없습니다.")
+            return
 
-def normalize_to_100(series: pd.Series) -> pd.Series:
-    """검색량 지표를 Google Trends 해석 기준인 0~100 범위로 재정규화함"""
-    series = pd.to_numeric(series, errors="coerce")
-    max_value = series.max()
+        stock_all = pd.read_csv(stock_path)
+        stock_all["Date"] = pd.to_datetime(stock_all["Date"])
+        final_trend_df["Date"] = pd.to_datetime(final_trend_df["Date"])
 
-    if pd.isna(max_value) or max_value <= 0:
-        return series.fillna(0)
+        merged = pd.merge(final_trend_df, stock_all, on=["Date", "ticker"], how="inner")
+        if merged.empty: return
 
-    return (series / max_value * 100).clip(lower=0, upper=100)
-
-
-def long_flat_mask(series: pd.Series, min_run: int = 14) -> pd.Series:
-    """같은 값이 오래 반복되는 구간을 수집 실패 가능성이 큰 구간으로 표시함"""
-    values = series.reset_index(drop=True)
-    groups = values.ne(values.shift()).cumsum()
-    run_lengths = values.groupby(groups).transform("size")
-
-    return run_lengths >= min_run
-
-
-def build_scaled_fallback(source: pd.Series, target: pd.Series) -> pd.Series:
-    """한국 검색량의 날짜별 흐름을 글로벌 검색량 범위에 맞춘 대체값으로 변환함"""
-    source_norm = normalize_to_100(source)
-    target_valid = target.dropna()
-
-    if target_valid.empty:
-        return source_norm
-
-    target_min = target_valid.min()
-    target_max = target_valid.max()
-
-    if target_max <= target_min:
-        return source_norm
-
-    return target_min + (source_norm / 100) * (target_max - target_min)
-
-
-def clean_global_trend(company_df: pd.DataFrame) -> pd.DataFrame:
-    """글로벌 검색량의 과도한 스케일과 긴 반복 구간을 보정함"""
-    company_df = company_df.copy()
-
-    company_df["trend_kor"] = normalize_to_100(company_df["trend_kor"])
-    company_df["trend_glb"] = normalize_to_100(company_df["trend_glb"])
-
-    flat_mask = long_flat_mask(company_df["trend_glb"])
-    fallback = build_scaled_fallback(
-        company_df["trend_kor"],
-        company_df["trend_glb"].mask(flat_mask),
-    )
-
-    company_df.loc[flat_mask, "trend_glb"] = fallback.loc[flat_mask]
-    company_df["trend_glb"] = company_df["trend_glb"].interpolate(method="linear")
-    company_df["trend_glb"] = company_df["trend_glb"].ffill().bfill()
-    company_df["trend_glb"] = normalize_to_100(company_df["trend_glb"])
-
-    return company_df
-
-
-def merge_company_files(company_key: str, info: dict) -> pd.DataFrame:
-    """기업별 한국/글로벌 트렌드를 병합하고 가중 검색량 값을 계산함"""
-    print(f"\n[기업 처리] {info['company_name']}")
-
-    kor_df = build_daily_trend(info.get("kor_files", info.get("files", [])), "trend_kor")
-
-    if kor_df.empty:
-        print(f"[스킵] {info['company_name']} 한국 검색량 데이터 없음")
-        return pd.DataFrame()
-
-    glb_df = build_daily_trend(info.get("glb_files", []), "trend_glb")
-
-    if glb_df.empty:
-        print(f"[경고] {info['company_name']} 글로벌 검색량 데이터 없음 - trend_kor를 trend_glb 임시값으로 사용")
-        glb_df = kor_df[["Date", "trend_kor"]].rename(columns={"trend_kor": "trend_glb"})
-
-    company_df = pd.merge(
-        kor_df,
-        glb_df,
-        on="Date",
-        how="left",
-    )
-
-    company_df["trend_glb"] = company_df["trend_glb"].interpolate(method="linear")
-    company_df["trend_glb"] = company_df["trend_glb"].ffill().bfill()
-    company_df = clean_global_trend(company_df)
-
-    company_df["ticker"] = info["ticker"]
-    company_df["company_name"] = info["company_name"]
-    company_df["foreign_ratio"] = info["foreign_ratio"]
-    # weighted_trend는 비율이 아니라 한국/글로벌 검색량을 외국인 비율로 가중 평균한 값
-    company_df["weighted_trend"] = (
-        company_df["foreign_ratio"] * company_df["trend_glb"]
-        + (1 - company_df["foreign_ratio"]) * company_df["trend_kor"]
-    )
-
-    company_df = company_df[
-        [
-            "Date",
-            "trend_kor",
-            "trend_glb",
-            "ticker",
-            "company_name",
-            "foreign_ratio",
-            "weighted_trend",
-        ]
-    ]
-
-    output_path = PROCESSED_DIR / f"{company_key}_trend_cleaned.csv"
-
-    try:
-        company_df.to_csv(
-            output_path,
-            index=False,
-            encoding="utf-8-sig"
-        )
-        print(f"[기업 저장 완료] {output_path}")
-    except PermissionError:
-        print(f"[경고] 파일이 열려 있어 저장하지 못함: {output_path}")
-
-    return company_df
-
-# --- 2. 주가 데이터 수집 및 피처 생성 함수 (기존 merge_stock_data.py 로직) ---
-
-def fetch_stock_data(ticker, start_date, end_date):
-    """Yahoo Finance에서 주가 데이터 수집"""
-    print(f"[주가 수집] {ticker}")
-
-    stock = yf.download(
-        ticker,
-        start=start_date,
-        end=end_date,
-        progress=False,
-    )
-
-    if stock.empty:
-        print(f"[경고] 주가 데이터 없음: {ticker}")
-        return pd.DataFrame()
-
-    # MultiIndex 컬럼 처리
-    if isinstance(stock.columns, pd.MultiIndex):
-        stock.columns = stock.columns.get_level_values(0)
-
-    stock = stock.reset_index()
-    stock["Date"] = pd.to_datetime(stock["Date"])
-    stock["ticker"] = ticker
-
-    return stock
-
-def make_features(df):
-    """머신러닝 학습용 파생 변수 생성"""
-    df = df.sort_values(["ticker", "Date"]).copy()
-
-    # 수익률 및 지연 변수
-    df["return"] = df.groupby("ticker")["Close"].pct_change()
-    df["return_lag1"] = df.groupby("ticker")["return"].shift(1)
-    
-    # 이동 평균 수익률
-    df["return_lag3_mean"] = df.groupby("ticker")["return"].transform(lambda x: x.rolling(3).mean())
-    df["return_lag7_mean"] = df.groupby("ticker")["return"].transform(lambda x: x.rolling(7).mean())
-
-    # 거래량 및 이동평균
-    df["volume_change"] = df.groupby("ticker")["Volume"].pct_change()
-    df["ma5"] = df.groupby("ticker")["Close"].transform(lambda x: x.rolling(5).mean())
-    df["ma20"] = df.groupby("ticker")["Close"].transform(lambda x: x.rolling(20).mean())
-
-    # 이동평균 괴리율
-    df["ma5_gap"] = (df["Close"] - df["ma5"]) / df["ma5"]
-    df["ma20_gap"] = (df["Close"] - df["ma20"]) / df["ma20"]
-
-    # 변동성 및 타겟 설정
-    df["volatility_7"] = df.groupby("ticker")["return"].transform(lambda x: x.rolling(7).std())
-    df["next_return"] = df.groupby("ticker")["return"].shift(-1)
-    df["target"] = (df["next_return"] > 0).astype(int)
-
-    return df
-
-# --- 3. 통합 실행 메인 함수 ---
-
-def main():
-    # 단계 1: 구글 트렌드 데이터 병합 및 정제
-    print("--- 1단계: 트렌드 데이터 처리 시작 ---")
-    all_trend_data = []
-    for company_key, info in COMPANY_CONFIG.items():
-        df = merge_company_files(company_key, info)
-        if not df.empty:
-            all_trend_data.append(df)
-
-    if not all_trend_data:
-        print("[에러] 처리된 트렌드 데이터가 없습니다.")
-        return
-
-    final_trend_df = pd.concat(all_trend_data, ignore_index=True)
-    try:
-        final_trend_df.to_csv(TREND_PATH, index=False, encoding="utf-8-sig")
-        print(f"[트렌드 병합 완료] {TREND_PATH}")
-    except PermissionError:
-        print(f"[에러] 파일이 열려 있어 저장하지 못함: {TREND_PATH}")
-        return
-
-    # 단계 2: 주가 데이터 병합 및 피처 생성
-    print("\n--- 2단계: 주가 데이터 병합 및 피처 생성 시작 ---")
-    tickers = final_trend_df["ticker"].unique()
-    start_date = final_trend_df["Date"].min().strftime("%Y-%m-%d")
-    # 마지막 날의 다음날 데이터까지 가져와야 다음날 수익률 계산 가능
-    end_date = (final_trend_df["Date"].max() + pd.Timedelta(days=1)).strftime("%Y-%m-%d")
-
-    stock_list = []
-    for ticker in tickers:
-        stock_df = fetch_stock_data(ticker, start_date, end_date)
-        if not stock_df.empty:
-            stock_list.append(stock_df)
-
-    if not stock_list:
-        print("[에러] 수집된 주가 데이터가 없습니다.")
-        return
-
-    stock_all = pd.concat(stock_list, ignore_index=True)
-
-    # 트렌드와 주가 데이터 병합
-    merged = pd.merge(
-        final_trend_df,
-        stock_all,
-        on=["Date", "ticker"],
-        how="inner",
-    )
-
-    # 피처 생성 및 결측치 제거
-    merged = make_features(merged)
-    merged = merged.dropna()
-
-    # 최종 데이터 저장
-    try:
-        merged.to_csv(OUTPUT_PATH, index=False, encoding="utf-8-sig")
-    except PermissionError:
-        print(f"[에러] 파일이 열려 있어 저장하지 못함: {OUTPUT_PATH}")
-        return
-
-    print("\n[최종 처리 완료]")
-    print(f"결과 파일: {OUTPUT_PATH}")
-    print(f"최종 데이터 크기: {merged.shape}")
-    print(merged.head())
+        merged = self.make_features(merged).dropna()
+        merged.to_csv(self.output_path, index=False, encoding="utf-8-sig")
+        print(f"[최종 처리 완료] {self.output_path} (크기: {merged.shape})")
 
 if __name__ == "__main__":
-    main()
+    processor = DataProcessor()
+    processor.run()

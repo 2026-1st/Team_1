@@ -8,7 +8,7 @@ from pytrends.request import TrendReq
 import config
 
 
-class GoogleTrendsCollector:
+class KoreaTrendsCollector:
     def __init__(self):
         self.pytrends = TrendReq(
             hl=config.GOOGLE_TRENDS_HL,
@@ -193,10 +193,7 @@ class GoogleTrendsCollector:
                 continue
 
             trend_col = f"trend_{keyword_type}"
-            weighted_col = f"weighted_trend_{keyword_type}"
-
             trend_df = trend_df.rename(columns={"trend": trend_col})
-            trend_df[weighted_col] = trend_df[trend_col] * foreign_ratio
 
             if company_df is None:
                 company_df = trend_df
@@ -262,5 +259,5 @@ class GoogleTrendsCollector:
 
 
 if __name__ == "__main__":
-    collector = GoogleTrendsCollector()
+    collector = KoreaTrendsCollector()
     collector.run()
