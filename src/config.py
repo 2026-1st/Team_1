@@ -116,6 +116,18 @@ PYTRENDS_WAIT_TIME = 40
 GOOGLE_TRENDS_CHUNK_DAYS = 90
 GOOGLE_TRENDS_OVERLAP_DAYS = 7
 
+# 글로벌 검색량 수집 결과 파일명
+GLOBAL_TREND_FILES = {
+    "005930.KS": "samsung_global.csv",
+    "000660.KS": "skhynix_global.csv",
+    "035420.KS": "naver_global.csv",
+    "012450.KS": "hanwha_global.csv",
+    "066570.KS": "lg_global.csv",
+    "005380.KS": "hyundai_global.csv",
+}
+
+ALL_COMPANIES_GLOBAL_TRENDS_FILE = "all_companies_global_trends.csv"
+
 # ==========================================
 # 경로 설정
 # ==========================================
