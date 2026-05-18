@@ -154,6 +154,7 @@ data/raw/*
 !data/raw/README.md
 !data/raw/.gitkeep
 data/processed/*
+!data/raw/stock
 !data/processed/README.md
 !data/processed/.gitkeep
 models/*.pkl
