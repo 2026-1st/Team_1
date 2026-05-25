@@ -29,7 +29,9 @@ class ModelTrainer:
             'return_lag1', 'return_lag3_mean', 'return_lag7_mean', 
             'volume_change', 'volatility_7', 'ma5', 'ma20', 'ma5_gap', 'ma20_gap', 
             'trend_lag1', 'trend_lag3_mean', 'trend_lag7_mean', 'trend_change', 
-            'ticker_encoded'
+            'ticker_encoded',
+            # EDA Section 8 추가 피처
+            'trend_shock', 'kor_glb_spread', 'trend_ma_interaction'
         ]
         self.target = 'target'
         self.scaler = StandardScaler()
@@ -59,12 +61,42 @@ class ModelTrainer:
         
         df = pd.read_csv(self.data_path)
         df['Date'] = pd.to_datetime(df['Date'])
+        
+        # EDA Section 8: 피처 엔지니어링 고도화
+        # 1. Trend Momentum (Shock): 검색량 200% 이상 급증 여부
+        df['trend_shock'] = (df['trend_change'] > 2.0).astype(int)
+        
+        # 2. KOR-GLB Spread: 국내외 관심도 차이
+        df['kor_glb_spread'] = df['trend_kor'] - df['trend_glb']
+        
+        # 3. Interaction: 검색량과 기술적 지표(과매도/과매수)의 결합
+        df['trend_ma_interaction'] = df['weighted_trend'] * df['ma5_gap']
+        
         # 무한대나 결측치 최종 처리
         df = df.replace([np.inf, -np.inf], np.nan)
         df = df.fillna(method='ffill').fillna(method='bfill').fillna(0)
         
         # 날짜와 티커 기준으로 정렬하여 일관성 유지
         return df.sort_values(['Date', 'ticker_encoded']).reset_index(drop=True)
+
+    def cross_validate(self, model, X, y, n_splits=5):
+        """TimeSeriesSplit을 이용한 교차 검증 (EDA Section 8 제언)"""
+        tscv = TimeSeriesSplit(n_splits=n_splits)
+        scores = []
+        
+        print(f"\n[TimeSeries Cross-Validation ({n_splits} splits)]")
+        for i, (train_index, test_index) in enumerate(tscv.split(X)):
+            X_train, X_test = X[train_index], X[test_index]
+            y_train, y_test = y.iloc[train_index], y.iloc[test_index]
+            
+            model.fit(X_train, y_train)
+            y_pred = model.predict(X_test)
+            acc = accuracy_score(y_test, y_pred)
+            scores.append(acc)
+            print(f"  Split {i+1}: Accuracy = {acc:.4f}")
+            
+        print(f"  Average Accuracy: {np.mean(scores):.4f} (+/- {np.std(scores):.4f})")
+        return scores
 
     def _split_data(self, df):
         """70% Train, 15% Val, 15% Test 순차 분할"""
@@ -97,16 +129,42 @@ class ModelTrainer:
         print(f"모델 저장 완료: {save_path}")
 
     def run(self):
-        """main.py에서 호출할 때의 기본 동작 (기본 로지스틱 회귀 예시)"""
-        print("--- 기본 학습 파이프라인 실행 ---")
+        """기본 및 고성능 모델(EDA 제언) 학습 파이프라인 실행"""
+        print("--- 모델 학습 파이프라인 실행 (EDA Section 8 반영) ---")
         (X_train, y_train), (X_val, y_val), (X_test, y_test) = self.get_prepared_data()
         
+        # 1. Baseline: Logistic Regression
+        print("\n[1. Baseline Model: Logistic Regression]")
         from sklearn.linear_model import LogisticRegression
-        model = LogisticRegression(max_iter=1000)
-        model.fit(X_train, y_train)
+        lr_model = LogisticRegression(max_iter=1000)
+        lr_model.fit(X_train, y_train)
+        self.evaluate_model(lr_model, X_test, y_test, "LogisticRegression_Baseline")
+        self.save_model(lr_model, "baseline_logistic")
+
+        # 2. Non-linear Model: Random Forest
+        print("\n[2. Advanced Model: Random Forest]")
+        from sklearn.ensemble import RandomForestClassifier
+        rf_model = RandomForestClassifier(n_estimators=100, random_state=config.RANDOM_STATE if hasattr(config, 'RANDOM_STATE') else 42)
         
-        self.evaluate_model(model, X_test, y_test, "LogisticRegression_Baseline")
-        self.save_model(model, "baseline_logistic")
+        # 교차 검증 수행
+        X_combined = np.vstack([X_train, X_val])
+        y_combined = pd.concat([y_train, y_val])
+        self.cross_validate(rf_model, X_combined, y_combined)
+        
+        rf_model.fit(X_train, y_train)
+        self.evaluate_model(rf_model, X_test, y_test, "RandomForest_Advanced")
+        self.save_model(rf_model, "advanced_rf")
+
+        # 3. Non-linear Model: XGBoost (EDA 제언)
+        print("\n[3. Advanced Model: XGBoost]")
+        try:
+            from xgboost import XGBClassifier
+            xgb_model = XGBClassifier(n_estimators=100, learning_rate=0.05, max_depth=6, random_state=42)
+            xgb_model.fit(X_train, y_train)
+            self.evaluate_model(xgb_model, X_test, y_test, "XGBoost_Advanced")
+            self.save_model(xgb_model, "advanced_xgb")
+        except ImportError:
+            print("XGBoost가 설치되어 있지 않아 건너뜁니다.")
 
 if __name__ == "__main__":
     trainer = ModelTrainer()
