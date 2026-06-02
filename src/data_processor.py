@@ -15,13 +15,25 @@ class DataProcessor:
 
         self.trend_path = self.processed_dir / "all_companies_trends_cleaned.csv"
         self.output_path = self.processed_dir / "all_companies_model_data.csv"
+        self.legacy_trend_prefixes = {
+            "005930.KS": "삼성",
+            "000660.KS": "sk",
+            "035420.KS": "네이버",
+            "012450.KS": "한화",
+            "066570.KS": "엘지",
+            "005380.KS": "현대차",
+        }
 
     def get_reference_trading_days(self, start_date, end_date):
         """KOSPI 지수를 기준으로 실제 개장일 리스트를 가져옴"""
         print(f"    [참조 데이터 로드] KOSPI 지수(^KS11) 기준 개장일 확인...")
         # yfinance end is exclusive
         yf_end = (pd.to_datetime(end_date) + timedelta(days=1)).strftime("%Y-%m-%d")
-        kospi = yf.download("^KS11", start=start_date, end=yf_end, progress=False)
+        try:
+            kospi = yf.download("^KS11", start=start_date, end=yf_end, progress=False)
+        except Exception as exc:
+            print(f"    [주의] KOSPI 기준일 로드 실패: {exc}")
+            return pd.DatetimeIndex([])
         return kospi.index
 
     def normalize_to_100(self, series: pd.Series) -> pd.Series:
@@ -65,6 +77,58 @@ class DataProcessor:
         df["trend_glb"] = df["trend_glb"].interpolate(method="linear").ffill().bfill()
         df["trend_glb"] = self.normalize_to_100(df["trend_glb"])
         return df
+
+    def load_legacy_trend_file(self, path: Path) -> pd.DataFrame:
+        """이전 형식의 Google Trends CSV(Time, 검색 관심도)를 로드"""
+        for encoding in ("utf-8-sig", "cp949", "euc-kr"):
+            try:
+                df = pd.read_csv(path, encoding=encoding)
+                break
+            except UnicodeDecodeError:
+                continue
+        else:
+            df = pd.read_csv(path)
+
+        date_col = "Time" if "Time" in df.columns else df.columns[0]
+        trend_col = next((col for col in df.columns if col != date_col), df.columns[-1])
+
+        return pd.DataFrame({
+            "Date": pd.to_datetime(df[date_col], errors="coerce"),
+            "trend_base": pd.to_numeric(df[trend_col], errors="coerce"),
+        }).dropna(subset=["Date", "trend_base"])
+
+    def build_legacy_korean_trends(self) -> pd.DataFrame:
+        """legacy 기업별 청크 CSV를 현재 전처리 스키마로 통합"""
+        all_data = []
+
+        for ticker, prefix in self.legacy_trend_prefixes.items():
+            paths = sorted(self.raw_trend_dir.glob(f"{prefix}_*.csv"))
+            if not paths:
+                continue
+
+            company_info = config.COMPANY_CONFIG[ticker]
+            company_df = pd.concat(
+                [self.load_legacy_trend_file(path) for path in paths],
+                ignore_index=True,
+            )
+            company_df = (
+                company_df
+                .groupby("Date", as_index=False)["trend_base"]
+                .mean()
+                .sort_values("Date")
+            )
+            company_df["trend_base"] = self.normalize_to_100(company_df["trend_base"])
+            company_df["ticker"] = ticker
+            company_df["company_name"] = company_info["company_name"]
+            company_df["foreign_ratio"] = company_info["foreign_ratio"]
+            all_data.append(company_df)
+
+        if not all_data:
+            return pd.DataFrame()
+
+        final_df = pd.concat(all_data, ignore_index=True)
+        final_df.to_csv(self.raw_trend_dir / config.ALL_COMPANIES_TRENDS_KR_FILE, index=False, encoding="utf-8-sig")
+        return final_df
 
     def process_company_trends(self, ticker, kor_trend_all, glb_trend_all):
         """기업별 트렌드 병합 및 가중치 계산"""
@@ -139,6 +203,26 @@ class DataProcessor:
             if self.trend_path.exists():
                 print(f"[정보] 기존 정제된 트렌드 파일을 사용합니다: {self.trend_path}")
                 final_trend_df = pd.read_csv(self.trend_path)
+            elif glb_path.exists():
+                print("[정보] legacy 국내 트렌드 파일을 통합합니다.")
+                kor_all = self.build_legacy_korean_trends()
+                if kor_all.empty:
+                    print("[에러] legacy 국내 트렌드 파일을 찾지 못했습니다.")
+                    return
+
+                glb_all = pd.read_csv(glb_path)
+                all_trends = []
+                for ticker in config.COMPANY_CONFIG.keys():
+                    df = self.process_company_trends(ticker, kor_all, glb_all)
+                    if not df.empty:
+                        all_trends.append(df)
+
+                if not all_trends:
+                    print("[에러] 처리된 트렌드 데이터가 없습니다.")
+                    return
+
+                final_trend_df = pd.concat(all_trends, ignore_index=True)
+                final_trend_df.to_csv(self.trend_path, index=False, encoding="utf-8-sig")
             else:
                 print("[에러] 정제된 트렌드 파일도 없습니다. 처리를 중단합니다.")
                 return
@@ -204,6 +288,9 @@ class DataProcessor:
 
         # 영업일 기준 누락 데이터 보정 (KOSPI 지수 기준)
         ref_days = self.get_reference_trading_days(config.START_DATE, config.END_DATE)
+        if ref_days.empty:
+            print("    [정보] 로컬 주가 CSV 날짜를 기준 거래일로 사용합니다.")
+            ref_days = pd.DatetimeIndex(sorted(stock_all_raw["Date"].dropna().unique()))
         
         corrected_stocks = []
         for ticker in stock_all_raw["ticker"].unique():

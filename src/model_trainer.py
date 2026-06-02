@@ -1,10 +1,13 @@
 import os
+from pathlib import Path
 import pandas as pd
 import numpy as np
 import joblib
+os.environ.setdefault("MPLCONFIGDIR", str(Path(os.getenv("TMPDIR", "/tmp")) / "team1_matplotlib"))
+import matplotlib
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import seaborn as sns
-from pathlib import Path
 from sklearn.model_selection import TimeSeriesSplit
 from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import accuracy_score, f1_score, classification_report, confusion_matrix
@@ -61,6 +64,8 @@ class ModelTrainer:
         
         df = pd.read_csv(self.data_path)
         df['Date'] = pd.to_datetime(df['Date'])
+        if 'trend_kor' not in df.columns and 'trend_base' in df.columns:
+            df['trend_kor'] = df['trend_base']
         
         # EDA Section 8: 피처 엔지니어링 고도화
         # 1. Trend Momentum (Shock): 검색량 200% 이상 급증 여부
@@ -74,7 +79,7 @@ class ModelTrainer:
         
         # 무한대나 결측치 최종 처리
         df = df.replace([np.inf, -np.inf], np.nan)
-        df = df.fillna(method='ffill').fillna(method='bfill').fillna(0)
+        df = df.ffill().bfill().fillna(0)
         
         # 날짜와 티커 기준으로 정렬하여 일관성 유지
         return df.sort_values(['Date', 'ticker_encoded']).reset_index(drop=True)
@@ -118,7 +123,9 @@ class ModelTrainer:
         plt.title(f"Confusion Matrix - {model_name}")
         plt.xlabel('Predicted')
         plt.ylabel('Actual')
-        plt.show()
+        plt.tight_layout()
+        plt.savefig(self.reports_dir / f"{model_name}_confusion_matrix.png")
+        plt.close()
         
         return y_pred
 
