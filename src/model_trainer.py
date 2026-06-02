@@ -62,6 +62,20 @@ class ModelTrainer:
         df = pd.read_csv(self.data_path)
         df['Date'] = pd.to_datetime(df['Date'])
         
+        # 누락된 기본 피처 자동 생성 (CSV에 없을 경우)
+        df = df.sort_values(['ticker', 'Date'])
+        
+        if 'trend_lag1' not in df.columns:
+            df['trend_lag1'] = df.groupby('ticker')['weighted_trend'].shift(1)
+        if 'trend_lag3_mean' not in df.columns:
+            df['trend_lag3_mean'] = df.groupby('ticker')['weighted_trend'].transform(lambda x: x.rolling(3).mean())
+        if 'trend_lag7_mean' not in df.columns:
+            df['trend_lag7_mean'] = df.groupby('ticker')['weighted_trend'].transform(lambda x: x.rolling(7).mean())
+        if 'trend_change' not in df.columns:
+            df['trend_change'] = df.groupby('ticker')['weighted_trend'].pct_change()
+        if 'ticker_encoded' not in df.columns:
+            df['ticker_encoded'] = df['ticker'].astype('category').cat.codes
+
         # EDA Section 8: 피처 엔지니어링 고도화
         # 1. Trend Momentum (Shock): 검색량 200% 이상 급증 여부
         df['trend_shock'] = (df['trend_change'] > 2.0).astype(int)
