@@ -66,6 +66,19 @@ class ModelTrainer:
         df['Date'] = pd.to_datetime(df['Date'])
         if 'trend_kor' not in df.columns and 'trend_base' in df.columns:
             df['trend_kor'] = df['trend_base']
+        df = df.sort_values(['ticker', 'Date']).reset_index(drop=True)
+
+        if 'ticker_encoded' not in df.columns:
+            df['ticker_encoded'] = df['ticker'].astype('category').cat.codes
+
+        if 'trend_lag1' not in df.columns:
+            df['trend_lag1'] = df.groupby('ticker')['weighted_trend'].shift(1)
+        if 'trend_lag3_mean' not in df.columns:
+            df['trend_lag3_mean'] = df.groupby('ticker')['weighted_trend'].transform(lambda x: x.rolling(3).mean())
+        if 'trend_lag7_mean' not in df.columns:
+            df['trend_lag7_mean'] = df.groupby('ticker')['weighted_trend'].transform(lambda x: x.rolling(7).mean())
+        if 'trend_change' not in df.columns:
+            df['trend_change'] = df.groupby('ticker')['weighted_trend'].pct_change()
         
         # EDA Section 8: 피처 엔지니어링 고도화
         # 1. Trend Momentum (Shock): 검색량 200% 이상 급증 여부
