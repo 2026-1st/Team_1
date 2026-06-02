@@ -149,3 +149,8 @@ for path in [
 ]:
     if not os.path.exists(path):
         os.makedirs(path)
+
+# ==========================================
+# 6. 기타 설정 (Misc)
+# ==========================================
+RANDOM_STATE = 42
