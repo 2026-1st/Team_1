@@ -1,47 +1,41 @@
-import time
-from trend_korea_collector import KoreaTrendsCollector
-from collect_global_trends import GlobalTrendCollector
-from stock_collector import StockDataCollector
-from data_processor import DataProcessor
-from model_trainer import ModelTrainer
+import sys
+import os
+
+# Add src to path
+sys.path.append(os.path.abspath(os.path.dirname(__file__)))
+
+from processing.processor import DataProcessor
+from processing.selector import select_features
+from models.classifier import ModelTrainer
+from models.evaluator import evaluate_models
 
 def main():
-    print("=" * 60)
-    print("      [종합 데이터 파이프라인 실행 시작]")
-    print("=" * 60)
-    start_time = time.time()
-
-    # 1. 국내(KR) 구글 트렌드 수집
-    print("\n[1/5] 국내 구글 트렌드 데이터 수집 중...")
-    kr_collector = KoreaTrendsCollector()
-    kr_collector.run()
-
-    # 2. 글로벌 구글 트렌드 수집
-    print("\n[2/5] 글로벌 구글 트렌드 데이터 수집 중...")
-    glb_collector = GlobalTrendCollector()
-    glb_collector.run()
-
-    # 3. 주가 데이터 수집 (Yahoo Finance)
-    print("\n[3/5] 주가 데이터 수집 중...")
-    stock_collector = StockDataCollector()
-    stock_collector.run()
-
-    # 4. 데이터 전처리 및 피처 엔지니어링
-    print("\n[4/5] 데이터 전처리 및 피처 생성 중...")
+    print("==================================================")
+    print("🚀 검색 관심도 기반 주가 방향 예측 리빌드 파이프라인 시작")
+    print("==================================================")
+    
+    # Step 1: Data Processing
+    print("\n[Step 1] 데이터 전처리 및 100+ 피처 생성")
     processor = DataProcessor()
     processor.run()
-
-    # 5. 모델 학습 및 평가
-    print("\n[5/5] 모델 학습 및 평가 진행 중...")
-    trainer = ModelTrainer()
-    trainer.run()
-
-    end_time = time.time()
-    duration = (end_time - start_time) / 60
     
-    print("\n" + "=" * 60)
-    print(f"      [모든 공정 완료] 소요 시간: {duration:.2f}분")
-    print("=" * 60)
+    # Step 2: Feature Selection
+    print("\n[Step 2] XGBoost 중요도 및 상관관계 기반 피처 최적화")
+    select_features(target_count=25)
+    
+    # Step 3: Model Training
+    print("\n[Step 3] 앙상블 모델 학습 및 시계열 교차 검증")
+    trainer = ModelTrainer()
+    trainer.train()
+    
+    # Step 4: Evaluation & Reporting
+    print("\n[Step 4] 다각적 성능 분석 및 직관적 리포트 생성")
+    evaluate_models()
+    
+    print("\n==================================================")
+    print("✅ 모든 파이프라인이 성공적으로 완료되었습니다!")
+    print("결과물 확인: reports/ 폴더")
+    print("==================================================")
 
 if __name__ == "__main__":
     main()
