@@ -44,7 +44,7 @@
 ### 1.4 특성 선택 전략 (Feature Selection)
 모델의 복잡도를 제어하고 과적합을 방지하기 위해 **XGBoost 중요도 기반 Greedy Selection**을 수행했습니다. 상관관계가 0.85 이상인 중복 피처를 제거하여 최종 25개의 독립적인 핵심 변수셋을 구축했습니다.
 
-![변수 중요도 분석](reports/feature_importance.png)
+![변수 중요도 분석](../reports/feature_importance.png)
 *그림 1: 모델별 주요 변수 기여도. `weighted_trend`와 기술적 지표들이 상위권에 포진하여 대중 관심도의 유의성을 입증합니다.*
 
 ---
@@ -67,7 +67,7 @@
 | **XGBoost** | **0.5500** | 0.9123 | **0.5389** | 0.6775 | **0.5076** |
 | **Soft Voting Ensemble**| 0.5136 | 0.9737 | 0.5163 | 0.6748 | 0.4962 |
 
-![모델별 성능 비교](reports/classification_comparison.png)
+![모델별 성능 비교](../reports/classification_comparison.png)
 *그림 2: 테스트 세트 기준 최종 성능 지표 비교.*
 
 ### 2.3 결과 분석 및 해석
@@ -84,7 +84,7 @@
 
 | 모든 모델 혼동 행렬 비교 (2x2) | 모든 모델 PR 곡선 비교 (2x2) |
 | :---: | :---: |
-| ![혼동 행렬](reports/confusion_matrix_comparison.png) | ![PR 곡선](reports/pr_curve_comparison.png) |
+| ![혼동 행렬](../reports/confusion_matrix_comparison.png) | ![PR 곡선](../reports/pr_curve_comparison.png) |
 | *그림 3: 모델별 실제 상승(1)과 하락(0) 예측력 상세 분포.* | *그림 4: 분류 임계값 변화에 따른 정밀도-재현율 추이.* |
 
 ### 2.4 혼동 행렬 상세 분석 및 모델 성향 (`그림 3` 참조)
@@ -110,19 +110,19 @@
 테스트 세트 기준 정확도가 0.5 내외(Random Guess 수준)에 머무는 원인을 데이터 측면에서 심층 분석한 결과, 다음과 같은 결정적인 한계점들이 발견되었습니다.
 
 #### 1) 극히 낮은 신호 대 잡음비 (Correlation Gap)
-![타겟 상관계수](reports/target_correlation.png)
+![타겟 상관계수](../reports/target_correlation.png)
 *   **분석:** 위 그래프에서 빨간색으로 표시된 검색 트렌드 지표들은 익일 주가 방향(Target)과 거의 **0에 수렴하는 상관계수**를 보입니다. 반면 푸른색의 기술적 지표(RSI, MACD 등)들이 상대적으로 높은 상관성을 보이나, 이조차도 절대적인 수치는 낮습니다. 모델 입장에서는 학습할 '신호' 자체가 매우 미약한 상태입니다.
 
 #### 2) 상승/하락 집단 간의 변별력 부재
-![분포 비교](reports/distribution_overlap.png)
+![분포 비교](../reports/distribution_overlap.png)
 *   **분석:** `weighted_trend` 지표의 커널 밀도 추정(KDE) 결과, **주가가 상승한 날(Red)과 하락한 날(Blue)의 분포가 거의 완벽하게 일치**합니다. 이는 특정 검색량 수치가 관측되었을 때, 그것을 주가 상승의 예조로 판단할 수 있는 통계적 근거가 부족함을 의미합니다.
 
 #### 3) 검색 트렌드의 후행적 성격 (Lag Analysis)
-![교차 상관관계](reports/cross_correlation.png)
+![교차 상관관계](../reports/cross_correlation.png)
 *   **분석:** 교차 상관관계(Cross-Correlation) 분석 결과, Lag > 0 영역(주가 변동 이후 검색량 발생)에서 상관계수가 더 높게 나타나는 경향이 있습니다. 즉, 대중은 주가가 변동한 **이후**에 관련 내용을 검색하는 경향이 강하며, 이는 검색 데이터가 '선행 지표' 보다는 **'후행적 반응'**에 가깝다는 것을 시사합니다.
 
 #### 4) 기술 지표 대비 낮은 정보 획득량
-![그룹 비교](reports/group_comparison.png)
+![그룹 비교](../reports/group_comparison.png)
 *   **분석:** 지표 그룹별 평균 절대 상관계수를 비교해 보면, 검색 트렌드 지표의 정보량은 전통적인 기술적/가격 지표의 **절반 수준**에 불과합니다. 이는 주가 예측에 있어 검색량이 제공하는 추가적인 정보(Alpha)가 기존 가격 데이터에 비해 매우 희소함을 보여줍니다.
 
 #### 5) 외부 매크로 요인의 지배력
