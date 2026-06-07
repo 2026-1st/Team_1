@@ -1,40 +1,40 @@
-# 🧬 검색 관심도 기반 주가 방향 예측 시스템
+# 기계학습 기초 팀 프로젝트
 
-이 프로젝트는 구글 트렌드 검색량 데이터와 기술적 지표를 결합하여 주가의 상하방 움직임을 예측하는 머신러닝 시스템입니다.
+기계학습 기초 1팀 프로젝트 레포입니다.
+- Notion : [1팀 노션 링크](https://www.notion.so/3598fc4dd92380e5a175fa80c98d8a7f?source=copy_link)
 
-## 🏗️ 시스템 아키텍처
+## 개발 환경
+- Python Version: 3.11.x
+- Dependency Management: requirements.txt
 
-모든 소스 코드는 `src/` 하위에 모듈화되어 있으며, 상호 의존성을 최소화하도록 설계되었습니다.
+### 설치 및 설정
+1. 저장소 복제:
+   ```bash
+   git clone https://github.com/2026-1st/Team_1.git
+   cd Team_1
+   ```
+2. 가상환경 생성 (선택 사항):
+   ```bash
+   python -m venv venv
+   source venv/bin/activate  # Windows: venv\Scripts\activate
+   ```
+3. 라이브러리 설치:
+   ```bash
+   pip install -r requirements.txt
+   ```
 
-- **data/**: 원본 데이터 및 전처리된 데이터 세트
-- **models/**: 학습 완료된 모델 바이너리 (.joblib)
-- **notebooks/**: 분석 및 실험용 Jupyter Notebook
-- **reports/**: 분석 결과 시각화 자료 및 성능 지표 CSV
-- **src/**: 실제 실행 가능한 소스 코드 (전처리, 학습, 평가, 유틸리티)
-
-## 🚀 주요 특징
-
-- **데이터 병합:** 주가 데이터와 트렌드 데이터를 시계열 기준으로 정밀 병합
-- **피처 엔지니어링:** 100개 이상의 기술적 지표 및 트렌드 피처 생성
-- **앙상블 모델:** Random Forest, XGBoost, Logistic Regression 기반의 앙상블 학습
-- **엄격한 검증:** TimeSeriesSplit을 이용한 시계열 교차 검증 및 데이터 누수 방지
-
-## 🛠️ 시작하기
-
-### 1. 환경 설정
-필요한 패키지를 설치합니다.
-```bash
-pip install -r requirements.txt
+## 프로젝트 구조
+```text
+root/
+├── data/                 # 데이터 저장소
+│   ├── raw/              # 수집된 원본 데이터 (수정 금지)
+│   └── processed/        # 전처리가 완료된 정제 데이터
+├── notebooks/            # EDA 및 프로토타이핑 (Jupyter Notebook)
+├── src/                  # 재사용 가능한 소스 코드 (Python Script)
+│   ├── __init__.py
+├── models/               # 학습된 모델 파일 저장 (.pkl, .h5 등)
+├── reports/              # 시각화 결과물 및 보고서
+│   └── figures/          # 그래프 이미지 저장 경로
+├── requirements.txt      # 프로젝트 의존성 목록
+└── README.md             # 프로젝트 개요 및 가이드라인
 ```
-*(참고: 프로젝트 루트에 requirements.txt가 아직 없는 경우 생성 필요)*
-
-### 2. 실행
-전체 파이프라인(데이터 전처리부터 모델 평가까지)을 실행하려면 `src/main.py`를 실행합니다.
-```bash
-python src/main.py
-```
-
-## 🛡️ 개발 원칙
-- 모든 데이터 처리는 `src/processing/` 내에서 이루어집니다.
-- 모델 설정 및 하이퍼파라미터는 `src/utils/config.py`에서 관리합니다.
-- 상세한 아키텍처 가이드는 `GEMINI.md`를 참조하세요.
